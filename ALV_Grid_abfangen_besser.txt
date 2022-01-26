@@ -1,0 +1,84 @@
+*&---------------------------------------------------------------------*
+*& Report ZMUNO_KOB2
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT zmuno_kob2.
+
+DATA: o_alv_data TYPE REF TO data,
+      gr_table TYPE REF TO data.
+
+        FIELD-SYMBOLS: <alv> TYPE STANDARD TABLE,
+                       <table> TYPE STANDARD TABLE.
+START-OF-SELECTION.
+*Init
+cl_salv_bs_runtime_info=>set( EXPORTING display  = abap_false  " Report anzeigen?
+                                        metadata = abap_true    " Metadaten des ALV-Grids ermitteln?
+                                        data     = abap_true ). " Datenimport aus ALV-Grid?
+* Selektionparameter "Werk" vorbelegen
+SET PARAMETER ID 'SE16N_TAB' FIELD 'MARA'.
+* Transaktion aufrufen
+CALL TRANSACTION 'SE16N' AND SKIP FIRST SCREEN.
+
+TRY.
+* Datenreferenz auf ALV-Daten des Reports
+      cl_salv_bs_runtime_info=>get_data_ref( IMPORTING r_data = o_alv_data ).
+      IF o_alv_data IS BOUND.
+        ASSIGN o_alv_data->* TO <alv>.
+        IF <alv> IS ASSIGNED.
+* Metadaten des ALV-Grids
+          DATA(lv_metadata) = cl_salv_bs_runtime_info=>get_metadata( ).
+* Dynamische Tabelle mit Feldkatalog erzeugen
+ CALL METHOD cl_alv_table_create=>create_dynamic_table
+    EXPORTING
+      it_fieldcatalog           = lv_metadata-t_fcat
+    IMPORTING
+      ep_table                  = gr_table
+    EXCEPTIONS
+      generate_subpool_dir_full = 1
+      OTHERS                    = 2.
+      ASSIGN gr_table->* TO <table>.
+* Umkopieren der Tabelle zeilenweise in dyn. Tabelle (wirklich erforderlich?)
+*          LOOP AT <alv> ASSIGNING FIELD-SYMBOL(<row>).
+*                          APPEND <row> TO <table>.
+*          ENDLOOP.
+        ENDIF.
+ENDIF.
+CATCH cx_root INTO DATA(e_txt).
+    WRITE: / e_txt->get_text( ).
+ENDTRY.
+
+TRY.
+    cl_salv_bs_runtime_info=>clear_all( ).
+  CATCH cx_root INTO DATA(e_txt2).
+    WRITE: / e_txt2->get_text( ).
+ENDTRY.
+* CSV Tabelle erstellen
+DATA(lt_outline) = VALUE truxs_t_text_data( ( ) ).
+DATA(lv_col_cnt) = lines( lv_metadata-t_fcat ).
+
+* Erstellen der Kopfzeile
+DATA(lv_head) = VALUE #( lt_outline[ 1 ] ).
+CLEAR lv_head.
+*Kopfzeile aus dem Feldkatalog erstellen
+LOOP AT lv_metadata-t_fcat ASSIGNING FIELD-SYMBOL(<f>).
+            CONCATENATE lv_head <f>-seltext ';' INTO lv_head.
+ENDLOOP.
+SHIFT lv_head RIGHT DELETING TRAILING ';'.
+INSERT lv_head INTO lt_outline INDEX 1.
+
+    LOOP AT <alv> ASSIGNING FIELD-SYMBOL(<row>).
+            APPEND INITIAL LINE TO lt_outline ASSIGNING FIELD-SYMBOL(<outline>).
+            DO lv_col_cnt TIMES.
+* Spaltenweise die Zellen der akt. Zeile
+              ASSIGN COMPONENT sy-index OF STRUCTURE <row> TO FIELD-SYMBOL(<cell>).
+              <outline> = <outline> && <cell> && ';'.
+            ENDDO.
+            SHIFT <outline> RIGHT DELETING TRAILING ';'.
+          ENDLOOP.
+**********************************************************************
+*** Ausgabe
+
+LOOP AT lt_outline ASSIGNING <outline>.
+WRITE: / <outline>.
+ENDLOOP.
